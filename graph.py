@@ -1160,3 +1160,14 @@ if __name__ == "__main__":
 path = Path("/mnt/data/graphify_ops.py")
 path.write_text(code, encoding="utf-8")
 print(f"Wrote {path}")
+
+python graphify_ops.py graphify-out/graph.json inspect
+python graphify_ops.py graphify-out/graph.json order
+python graphify_ops.py graphify-out/graph.json slice "some_node_id"
+python graphify_ops.py graphify-out/graph.json method-prompt "some_node_id"
+python graphify_ops.py graphify-out/graph.json class-prompt "some_node_id"
+python graphify_ops.py graphify-out/graph.json file-prompt "some_file_node_id"
+python graphify_ops.py graphify-out/graph.json flow-prompt "start_node_id" "end_node_id"
+python graphify_ops.py graphify-out/graph.json arch-prompt
+python graphify_ops.py graphify-out/graph.json ledger
+python graphify_ops.py graphify-out/graph.json impacted "changed_node_id_1" "changed_node_id_2"
