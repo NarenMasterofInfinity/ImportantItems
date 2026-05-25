@@ -1,0 +1,287 @@
+Build it as a table-discovery + table-normalization agent, not just an Excel parser.
+
+Core goal
+
+Given any Excel workbook, detect every logical table separately, even when:
+
+multiple tables exist on one sheet
+
+tables are placed far apart
+
+tables have merged cells
+
+headers span multiple rows
+
+blank rows/columns appear inside tables
+
+small nested tables exist inside larger tables
+
+titles/notes appear above or below tables
+
+users format things visually instead of using Excel table objects
+
+
+Best architecture
+
+Excel file
+   ↓
+Workbook scanner
+   ↓
+Sheet layout grid
+   ↓
+Candidate table region detection
+   ↓
+Table boundary refinement
+   ↓
+Header/body/footer classification
+   ↓
+Nested table detection
+   ↓
+LLM/agent validation
+   ↓
+Structured output per table
+
+Step 1: Read everything, not just values
+
+Use openpyxl or python-calamine.
+
+Extract for every cell:
+
+row, column
+value
+formula
+data type
+merged-cell info
+font bold/size
+fill color
+border
+alignment
+number format
+row height / column width
+hidden rows/cols
+
+Formatting is very important because Excel tables are often visually defined.
+
+Step 2: Convert sheet into a cell graph
+
+Treat each non-empty or formatted cell as a node.
+
+Edges connect nearby cells:
+
+same row
+same column
+border-connected
+aligned block
+merged-region connected
+nearby with small blank gap
+
+Then detect connected components.
+
+This gives you rough table-like islands.
+
+Step 3: Detect candidate table regions
+
+Use multiple signals together:
+
+Strong signals
+
+rectangular dense region of non-empty cells
+
+consistent columns
+
+borders around cells
+
+bold/header-like top rows
+
+repeated data types down columns
+
+merged title row above body
+
+similar row lengths
+
+formulas repeated down a column
+
+
+Weak signals
+
+fill color
+
+centered text
+
+large font
+
+currency/date/percentage formatting
+
+blank row separating blocks
+
+
+Each candidate region gets a score:
+
+table_score =
+  density_score
++ border_score
++ column_consistency_score
++ header_score
++ datatype_consistency_score
++ formatting_consistency_score
+- prose_score
+- random_notes_score
+
+Step 4: Boundary refinement
+
+After finding a rough region, expand/shrink boundaries.
+
+Useful rules:
+
+Expand if nearby row/column has:
+- similar borders
+- same alignment
+- same number of populated columns
+- formula continuation
+- same fill pattern
+
+Stop if:
+- large blank gap
+- different formatting block
+- paragraph-like text
+- title/note/footer
+- another independent dense block starts
+
+Allow small blank gaps inside a table, but not large gaps.
+
+Step 5: Header detection
+
+Headers are hard, so use both rules and LLM.
+
+Possible header rows:
+
+first 1–5 rows of the candidate table
+
+rows with mostly text
+
+bold/fill/center aligned
+
+merged cells
+
+rows before mostly numeric/date body begins
+
+
+Then flatten multi-row headers:
+
+Region | Q1 | Q1 | Q2 | Q2
+       | Sales | Profit | Sales | Profit
+
+becomes:
+
+Region
+Q1 Sales
+Q1 Profit
+Q2 Sales
+Q2 Profit
+
+Step 6: Detect nested tables
+
+Inside a large detected region, look for subregions with:
+
+separate border box
+
+different header row
+
+different column count
+
+blank padding around it
+
+distinct title
+
+different fill/border style
+
+
+Then decide:
+
+if inner block is structurally independent:
+    extract as separate nested table
+else:
+    keep as part of parent table
+
+Step 7: Use LLM/agent as verifier, not first detector
+
+Do not send the whole Excel blindly to an LLM.
+
+Instead send compact metadata:
+
+{
+  "sheet": "Sheet1",
+  "candidate_region": "B4:H22",
+  "sample_values": "...",
+  "format_summary": "...",
+  "detected_headers": "...",
+  "neighboring_cells": "...",
+  "question": "Is this one table, multiple tables, or not a table?"
+}
+
+Ask the LLM to return strict JSON:
+
+{
+  "is_table": true,
+  "table_type": "main|nested|summary|pivot-like|note",
+  "final_range": "B4:H22",
+  "header_rows": [4, 5],
+  "body_start_row": 6,
+  "footer_rows": [22],
+  "confidence": 0.91,
+  "reason": "Two header rows followed by consistent numeric columns."
+}
+
+Step 8: Output format
+
+For every table:
+
+{
+  "table_id": "sheet1_table_003",
+  "sheet": "Sheet1",
+  "range": "B4:H22",
+  "title": "Monthly Sales Summary",
+  "header_rows": [4, 5],
+  "columns": [
+    "Region",
+    "Q1 Sales",
+    "Q1 Profit",
+    "Q2 Sales",
+    "Q2 Profit"
+  ],
+  "rows": [],
+  "notes": [],
+  "confidence": 0.91,
+  "parent_table_id": null
+}
+
+Also produce CSV/Parquet per table.
+
+Recommended implementation stack
+
+openpyxl       → read workbook values + styles
+pandas         → normalize extracted table data
+networkx       → connected component detection
+pydantic       → strict output schemas
+LLM/agent      → table verification and header reasoning
+rapidfuzz      → deduplicate similar headers/titles
+
+Optional but powerful:
+
+LibreOffice headless → render sheet to PDF/image
+Computer vision      → detect visually boxed tables
+
+Best practical approach
+
+Use a hybrid system:
+
+Rules detect candidates.
+LLM validates and fixes boundaries.
+Rules extract final data.
+LLM fixes headers and table meaning.
+
+Do not rely only on LLMs. Excel structure, coordinates, styles, merged cells, and formulas are deterministic and should be handled by code.
+
+One-line strategy
+
+Detect visual/structural table regions from the Excel grid first, then use an LLM agent only to resolve ambiguity, validate boundaries, identify headers, and split nested/nearby tables.
